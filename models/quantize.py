@@ -50,7 +50,7 @@ from models.quantize_rules import find_quantizer_pairs
 class QuantAdd(torch.nn.Module, quant_nn_utils.QuantMixin):
     def __init__(self, quantization):
         super().__init__()
-        
+
         if quantization:
             self._input0_quantizer = quant_nn.TensorQuantizer(QuantDescriptor())
             self._input1_quantizer = quant_nn.TensorQuantizer(QuantDescriptor())
@@ -74,39 +74,27 @@ class QuantADownAvgChunk(torch.nn.Module):
         x = self._chunk_quantizer(x)
         return x.chunk(2, 1)
 
-class QuantAConvAvgChunk(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self._chunk_quantizer = quant_nn.TensorQuantizer(QuantDescriptor(num_bits=8, calib_method="histogram"))
-        self._chunk_quantizer._calibrator._torch_hist = True
-        self.avg_pool2d = torch.nn.AvgPool2d(2, 1, 0, False, True)
-
-    def forward(self, x):
-        x = self.avg_pool2d(x)
-        x = self._chunk_quantizer(x)
-        return x
-    
 class QuantRepNCSPELAN4Chunk(torch.nn.Module):
     def __init__(self, c):
         super().__init__()
         self._input0_quantizer = quant_nn.TensorQuantizer(QuantDescriptor())
         self.c = c
     def forward(self, x, chunks, dims):
-        return torch.split(self._input0_quantizer(x), (self.c, self.c), dims) 
-       
-class QuantUpsample(torch.nn.Module): 
+        return torch.split(self._input0_quantizer(x), (self.c, self.c), dims)
+
+class QuantUpsample(torch.nn.Module):
     def __init__(self, size, scale_factor, mode):
         super().__init__()
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
         self._input_quantizer = quant_nn.TensorQuantizer(QuantDescriptor())
-        
-    def forward(self, x):
-        return F.interpolate(self._input_quantizer(x), self.size, self.scale_factor, self.mode) 
 
-             
-class QuantConcat(torch.nn.Module): 
+    def forward(self, x):
+        return F.interpolate(self._input_quantizer(x), self.size, self.scale_factor, self.mode)
+
+
+class QuantConcat(torch.nn.Module):
     def __init__(self, dim):
         super().__init__()
         self._input0_quantizer = quant_nn.TensorQuantizer(QuantDescriptor())
@@ -116,9 +104,9 @@ class QuantConcat(torch.nn.Module):
     def forward(self, x, dim):
         x_0 = self._input0_quantizer(x[0])
         x_1 = self._input1_quantizer(x[1])
-        return torch.cat((x_0, x_1), self.dim) 
-              
-   
+        return torch.cat((x_0, x_1), self.dim)
+
+
 class disable_quantization:
     def __init__(self, model):
         self.model  = model
@@ -168,19 +156,25 @@ def initialize():
     quant_nn.QuantMaxPool2d.set_default_quant_desc_input(quant_desc_input)
 
     quant_logging.set_verbosity(quant_logging.ERROR)
-   
+
 
 def remove_redundant_qdq_model(onnx_model, f):
     check_requirements('onnx')
     import onnx
 
+    domain: str = onnx_model.domain
+    ir_version: int = onnx_model.ir_version
+    meta_data = {'domain': domain, 'ir_version': ir_version}
+    metadata_props = None
+    if hasattr(onnx_model, 'metadata_props'):
+        metadata_props = onnx_model.metadata_props
     graph = gs.import_onnx(onnx_model)
     nodes = graph.nodes
 
     mul_nodes = [node for node in nodes if node.op == "Mul" and node.i(0).op == "Conv" and node.i(1).op == "Sigmoid"]
     many_outputs_mul_nodes = []
 
-    for node in mul_nodes: 
+    for node in mul_nodes:
         try:
             for i in range(99):
                 node.o(i)
@@ -188,7 +182,7 @@ def remove_redundant_qdq_model(onnx_model, f):
             if i > 1:
                 mul_nodename_outnum = {"node": node, "out_num": i}
                 many_outputs_mul_nodes.append(mul_nodename_outnum)
-    
+
     for node_dict in many_outputs_mul_nodes:
         if node_dict["out_num"] == 2:
             if node_dict["node"].o(0).op == "QuantizeLinear" and node_dict["node"].o(1).op == "QuantizeLinear":
@@ -196,10 +190,10 @@ def remove_redundant_qdq_model(onnx_model, f):
                     concat_dq_out_name = node_dict["node"].o(1).o(0).outputs[0].name
                     for i, concat_input in enumerate(node_dict["node"].o(1).o(0).o(0).inputs):
                         if concat_input.name == concat_dq_out_name:
-                            node_dict["node"].o(1).o(0).o(0).inputs[i] = node_dict["node"].o(0).o(0).outputs[0] 
+                            node_dict["node"].o(1).o(0).o(0).inputs[i] = node_dict["node"].o(0).o(0).outputs[0]
                 else:
-                    node_dict["node"].o(1).o(0).o(0).inputs[0] = node_dict["node"].o(0).o(0).outputs[0] 
-                    
+                    node_dict["node"].o(1).o(0).o(0).inputs[0] = node_dict["node"].o(0).o(0).outputs[0]
+
 
             # elif node_dict["node"].o(0).op == "QuantizeLinear" and node_dict["node"].o(1).op == "Concat":
             #     concat_dq_out_name = node_dict["node"].outputs[0].outputs[0].inputs[0].name
@@ -207,12 +201,12 @@ def remove_redundant_qdq_model(onnx_model, f):
             #         if concat_input.name == concat_dq_out_name:
             #             #print("elif", concat_input.name, concat_dq_out_name )
             #             #print("will-be", node_dict["node"].outputs[0].outputs[1].inputs[i], node_dict["node"].outputs[0].outputs[0].o().outputs[0]  )
-            #             node_dict["node"].outputs[0].outputs[1].inputs[i] = node_dict["node"].outputs[0].outputs[0].o().outputs[0] 
+            #             node_dict["node"].outputs[0].outputs[1].inputs[i] = node_dict["node"].outputs[0].outputs[0].o().outputs[0]
 
-       
+
     # add_nodes = [node for node in nodes if node.op == "Add"]
     # many_outputs_add_nodes = []
-    # for node in add_nodes: 
+    # for node in add_nodes:
     #     try:
     #         for i in range(99):
     #             node.o(i)
@@ -227,10 +221,12 @@ def remove_redundant_qdq_model(onnx_model, f):
     #         concat_dq_out_name = node_dict["node"].outputs[0].outputs[0].inputs[0].name
     #         for i, concat_input in enumerate(node_dict["node"].outputs[0].outputs[1].inputs):
     #             if concat_input.name == concat_dq_out_name:
-    #                 node_dict["node"].outputs[0].outputs[1].inputs[i] = node_dict["node"].outputs[0].outputs[0].o().outputs[0]  
+    #                 node_dict["node"].outputs[0].outputs[1].inputs[i] = node_dict["node"].outputs[0].outputs[0].o().outputs[0]
 
-    onnx.save(gs.export_onnx(graph), f)
-
+    exported_graph = gs.export_onnx(graph, **meta_data)
+    if metadata_props is not None:
+        exported_graph.metadata_props.extend(metadata_props)
+    onnx.save(exported_graph, f)
 
 def transfer_torch_to_quantization(nninstance : torch.nn.Module, quantmodule):
     quant_instance = quantmodule.__new__(quantmodule)
@@ -305,7 +301,7 @@ def replace_to_quantization_module(model : torch.nn.Module, ignore_policy : Unio
                 if ignored:
                     LOGGER.info(f'{prefixx} Quantization: {path} has ignored.')
                     continue
-                    
+
                 module._modules[name] = transfer_torch_to_quantization(submodule, module_dict[submodule_id])
 
     recursive_and_replace_module(model)
@@ -353,11 +349,6 @@ def adown_quant_forward(self, x):
         x2 = self.cv2(x2)
         return torch.cat((x1, x2), 1)
 
-def aconv_quant_forward(self, x):
-    if hasattr(self, "aconvchunkop"):
-        x = self.aconvchunkop(x)
-        return self.cv1(x)
-      
 def apply_custom_rules_to_quantizer(model : torch.nn.Module, export_onnx : Callable):
     export_onnx(model,  "quantization-custom-rules-temp.onnx")
     pairs = find_quantizer_pairs("quantization-custom-rules-temp.onnx")
@@ -386,9 +377,7 @@ def apply_custom_rules_to_quantizer(model : torch.nn.Module, export_onnx : Calla
 
         if module.__class__.__name__ == 'ADown':
             module.cv1.conv._input_quantizer = module.adownchunkop._chunk_quantizer
-        if module.__class__.__name__ == 'AConv':
-            module.cv1.conv._input_quantizer = module.aconvchunkop._chunk_quantizer
-            
+
 def replace_custom_module_forward(model):
     for name, module  in model.named_modules():
         # if module.__class__.__name__ == "RepNCSPELAN4":
@@ -403,12 +392,6 @@ def replace_custom_module_forward(model):
                 module.adownchunkop = QuantADownAvgChunk()
             module.__class__.forward = adown_quant_forward
 
-        if module.__class__.__name__ == "AConv":
-            if not hasattr(module, "aconvchunkop"):
-                print(f"Add AConvQuantChunk to {name}")
-                module.aconvchunkop = QuantAConvAvgChunk()
-            module.__class__.forward = aconv_quant_forward
-
         if module.__class__.__name__ == "RepNBottleneck":
             if module.add:
                 if not hasattr(module, "addop"):
@@ -421,13 +404,13 @@ def replace_custom_module_forward(model):
                 print(f"Add QuantConcat to {name}")
                 module.concatop = QuantConcat(module.d)
             module.__class__.forward = concat_quant_forward
-        
+
         if module.__class__.__name__ == "Upsample":
             if not hasattr(module, "upsampleop"):
                 print(f"Add QuantUpsample to {name}")
                 module.upsampleop = QuantUpsample(module.size, module.scale_factor, module.mode)
             module.__class__.forward = upsample_quant_forward
-            
+
 def calibrate_model(model : torch.nn.Module, dataloader, device, num_batch=25):
 
     def compute_amax(model, **kwargs):
@@ -440,7 +423,7 @@ def calibrate_model(model : torch.nn.Module, dataloader, device, num_batch=25):
                         module.load_calib_amax(**kwargs)
 
                     module._amax = module._amax.to(device)
-        
+
     def collect_stats(model, data_loader, device, num_batch=200):
         """Feed data to the network and collect statistics"""
         # Enable calibrators
@@ -471,12 +454,12 @@ def calibrate_model(model : torch.nn.Module, dataloader, device, num_batch=25):
                     module.disable_calib()
                 else:
                     module.enable()
-    
+
     with torch.no_grad():
         collect_stats(model, dataloader, device, num_batch=num_batch)
         #compute_amax(model, method="percentile", percentile=99.99, strict=True) # strict=False avoid Exception when some quantizer are never used
-        compute_amax(model, method="mse") 
-   
+        compute_amax(model, method="mse")
+
 
 
 def finetune(
@@ -486,7 +469,7 @@ def finetune(
 ):
     origin_model = deepcopy(model).eval()
     disable_quantization(origin_model).apply()
-                    
+
     model.train()
     model.requires_grad_(True)
 
@@ -530,11 +513,11 @@ def finetune(
         model_outputs  = []
         origin_outputs = []
         remove_handle  = []
-        
+
 
 
         for ml, ori in supervision_module_pairs:
-            remove_handle.append(ml.register_forward_hook(make_layer_forward_hook(model_outputs))) 
+            remove_handle.append(ml.register_forward_hook(make_layer_forward_hook(model_outputs)))
             remove_handle.append(ori.register_forward_hook(make_layer_forward_hook(origin_outputs)))
 
         model.train()
@@ -543,10 +526,10 @@ def finetune(
 
             if ibatch >= early_exit_batchs_per_epoch:
                 break
-            
+
             if preprocess:
                 imgs = preprocess(imgs)
-                
+
 
             imgs = imgs.to(device)
             with amp.autocast(enabled=fp16):

@@ -98,6 +98,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr('ONNX
     import onnx
 
     is_model_qat=False
+    print('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ 1')
     for i in range(0, len(model.model)):
         layer = model.model[i]
         if quantize.have_quantizer(layer):
@@ -115,7 +116,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr('ONNX
             dynamic['output1'] = {0: 'batch', 2: 'mask_height', 3: 'mask_width'}  # shape(1,32,160,160)
         elif isinstance(model, DetectionModel):
             dynamic['output0'] = {0: 'batch', 1: 'anchors'}  # shape(1,25200,85)
-    
+
     if is_model_qat:
         warnings.filterwarnings("ignore")
         LOGGER.info(f'{prefix} Model QAT Detected ...')
@@ -125,17 +126,14 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr('ONNX
         quantize.replace_custom_module_forward(model)
         with torch.no_grad():
             torch.onnx.export(
-                model, 
-                im, 
+                model,
+                im,
                 f,
-                verbose=False,
                 opset_version=13,
-                do_constant_folding=True,
                 input_names=['images'],
-                output_names=output_names,
-                dynamic_axes=dynamic)
+                output_names=output_names)
 
-    else: 
+    else:
         torch.onnx.export(
             model.cpu() if dynamic else model,  # --dynamic only compatible with cpu
             im.cpu() if dynamic else im,
@@ -172,10 +170,10 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr('ONNX
             LOGGER.info(f'{prefix} simplifier failure: {e}')
 
     LOGGER.info(f'{prefix} Removing redundant Q/DQ layer with onnx_graphsurgeon {gs.__version__}...')
-    remove_redundant_qdq_model(model_onnx, f) 
+    remove_redundant_qdq_model(model_onnx, f)
     model_onnx = onnx.load(f)
     return f, model_onnx
-    
+
 
 @try_export
 def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thres, device, labels, prefix=colorstr('ONNX END2END:')):
@@ -184,14 +182,14 @@ def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thr
     # YOLO ONNX export
     check_requirements('onnx')
     import onnx
-    
+
     is_model_qat=False
     for i in range(0, len(model.model)):
         layer = model.model[i]
         if quantize.have_quantizer(layer):
             is_model_qat=True
             break
-    
+
     LOGGER.info(f'\n{prefix} starting export with onnx {onnx.__version__}...')
     f = os.path.splitext(file)[0] + "-end2end.onnx"
     batch_size = 'batch'
@@ -210,9 +208,9 @@ def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thr
     output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
     shapes = [ batch_size, 1,  batch_size,  topk_all, 4,
                batch_size,  topk_all,  batch_size,  topk_all]
-    
 
-    
+
+
     if is_model_qat:
         warnings.filterwarnings("ignore")
         LOGGER.info(f'{prefix} Model QAT Detected ...')
@@ -220,26 +218,26 @@ def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thr
         model.eval()
         quantize.initialize()
         quantize.replace_custom_module_forward(model)
-        
+
         with torch.no_grad():
-            torch.onnx.export(model, 
-                            im, 
-                            f, 
-                            verbose=False, 
+            torch.onnx.export(model,
+                            im,
+                            f,
+                            verbose=False,
                             export_params=True,       # store the trained parameter weights inside the model file
-                            opset_version=13, 
+                            opset_version=13,
                             do_constant_folding=True, # whether to execute constant folding for optimization
                             input_names=['images'],
                             output_names=output_names,
                             dynamic_axes=dynamic_axes)
         quant_nn.TensorQuantizer.use_fb_fake_quant = False
     else:
-        torch.onnx.export(model, 
-                    im, 
-                    f, 
-                    verbose=False, 
+        torch.onnx.export(model,
+                    im,
+                    f,
+                    verbose=False,
                     export_params=True,       # store the trained parameter weights inside the model file
-                    opset_version=12, 
+                    opset_version=12,
                     do_constant_folding=True, # whether to execute constant folding for optimization
                     input_names=['images'],
                     output_names=output_names,
@@ -267,7 +265,7 @@ def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thr
         print('ONNX export success, saved as %s' % f)
 
     LOGGER.info(f'{prefix} Removing redundant Q/DQ layer with onnx_graphsurgeon {gs.__version__}...')
-    remove_redundant_qdq_model(model_onnx, f) 
+    remove_redundant_qdq_model(model_onnx, f)
     model_onnx = onnx.load(f)
 
     return f, model_onnx
@@ -291,19 +289,19 @@ def export_openvino(file, metadata, half, prefix=colorstr('OpenVINO:')):
     return f, None
 
 
-@try_export
-def export_paddle(model, im, file, metadata, prefix=colorstr('PaddlePaddle:')):
-    # YOLO Paddle export
-    check_requirements(('paddlepaddle', 'x2paddle'))
-    import x2paddle
-    from x2paddle.convert import pytorch2paddle
+# @try_export
+# def export_paddle(model, im, file, metadata, prefix=colorstr('PaddlePaddle:')):
+#     # YOLO Paddle export
+#     check_requirements(('paddlepaddle', 'x2paddle'))
+#     import x2paddle
+#     from x2paddle.convert import pytorch2paddle
 
-    LOGGER.info(f'\n{prefix} starting export with X2Paddle {x2paddle.__version__}...')
-    f = str(file).replace('.pt', f'_paddle_model{os.sep}')
+#     LOGGER.info(f'\n{prefix} starting export with X2Paddle {x2paddle.__version__}...')
+#     f = str(file).replace('.pt', f'_paddle_model{os.sep}')
 
-    pytorch2paddle(module=model, save_dir=f, jit_type='trace', input_examples=[im])  # export
-    yaml_save(Path(f) / file.with_suffix('.yaml').name, metadata)  # add metadata.yaml
-    return f, None
+#     pytorch2paddle(module=model, save_dir=f, jit_type='trace', input_examples=[im])  # export
+#     yaml_save(Path(f) / file.with_suffix('.yaml').name, metadata)  # add metadata.yaml
+#     return f, None
 
 
 @try_export
@@ -545,37 +543,37 @@ def export_tfjs(file, prefix=colorstr('TensorFlow.js:')):
     return f, None
 
 
-def add_tflite_metadata(file, metadata, num_outputs):
-    # Add metadata to *.tflite models per https://www.tensorflow.org/lite/models/convert/metadata
-    with contextlib.suppress(ImportError):
-        # check_requirements('tflite_support')
-        from tflite_support import flatbuffers
-        from tflite_support import metadata as _metadata
-        from tflite_support import metadata_schema_py_generated as _metadata_fb
+# def add_tflite_metadata(file, metadata, num_outputs):
+#     # Add metadata to *.tflite models per https://www.tensorflow.org/lite/models/convert/metadata
+#     with contextlib.suppress(ImportError):
+#         # check_requirements('tflite_support')
+#         from tflite_support import flatbuffers
+#         from tflite_support import metadata as _metadata
+#         from tflite_support import metadata_schema_py_generated as _metadata_fb
 
-        tmp_file = Path('/tmp/meta.txt')
-        with open(tmp_file, 'w') as meta_f:
-            meta_f.write(str(metadata))
+#         tmp_file = Path('/tmp/meta.txt')
+#         with open(tmp_file, 'w') as meta_f:
+#             meta_f.write(str(metadata))
 
-        model_meta = _metadata_fb.ModelMetadataT()
-        label_file = _metadata_fb.AssociatedFileT()
-        label_file.name = tmp_file.name
-        model_meta.associatedFiles = [label_file]
+#         model_meta = _metadata_fb.ModelMetadataT()
+#         label_file = _metadata_fb.AssociatedFileT()
+#         label_file.name = tmp_file.name
+#         model_meta.associatedFiles = [label_file]
 
-        subgraph = _metadata_fb.SubGraphMetadataT()
-        subgraph.inputTensorMetadata = [_metadata_fb.TensorMetadataT()]
-        subgraph.outputTensorMetadata = [_metadata_fb.TensorMetadataT()] * num_outputs
-        model_meta.subgraphMetadata = [subgraph]
+#         subgraph = _metadata_fb.SubGraphMetadataT()
+#         subgraph.inputTensorMetadata = [_metadata_fb.TensorMetadataT()]
+#         subgraph.outputTensorMetadata = [_metadata_fb.TensorMetadataT()] * num_outputs
+#         model_meta.subgraphMetadata = [subgraph]
 
-        b = flatbuffers.Builder(0)
-        b.Finish(model_meta.Pack(b), _metadata.MetadataPopulator.METADATA_FILE_IDENTIFIER)
-        metadata_buf = b.Output()
+#         b = flatbuffers.Builder(0)
+#         b.Finish(model_meta.Pack(b), _metadata.MetadataPopulator.METADATA_FILE_IDENTIFIER)
+#         metadata_buf = b.Output()
 
-        populator = _metadata.MetadataPopulator.with_model_file(file)
-        populator.load_metadata_buffer(metadata_buf)
-        populator.load_associated_files([str(tmp_file)])
-        populator.populate()
-        tmp_file.unlink()
+#         populator = _metadata.MetadataPopulator.with_model_file(file)
+#         populator.load_metadata_buffer(metadata_buf)
+#         populator.load_associated_files([str(tmp_file)])
+#         populator.populate()
+#         tmp_file.unlink()
 
 
 @smart_inference_mode()
@@ -652,6 +650,7 @@ def run(
     if engine:  # TensorRT required before ONNX
         f[1], _ = export_engine(model, im, file, half, dynamic, simplify, workspace, verbose)
     if onnx or xml:  # OpenVINO requires ONNX
+        print('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ export onnx')
         f[2], _ = export_onnx(model, im, file, opset, dynamic, simplify)
     if onnx_end2end:
         labels = model.names
@@ -660,31 +659,31 @@ def run(
         f[3], _ = export_openvino(file, metadata, half)
     if coreml:  # CoreML
         f[4], _ = export_coreml(model, im, file, int8, half)
-    if any((saved_model, pb, tflite, edgetpu, tfjs)):  # TensorFlow formats
-        assert not tflite or not tfjs, 'TFLite and TF.js models must be exported separately, please pass only one type.'
-        assert not isinstance(model, ClassificationModel), 'ClassificationModel export to TF formats not yet supported.'
-        f[5], s_model = export_saved_model(model.cpu(),
-                                           im,
-                                           file,
-                                           dynamic,
-                                           tf_nms=nms or agnostic_nms or tfjs,
-                                           agnostic_nms=agnostic_nms or tfjs,
-                                           topk_per_class=topk_per_class,
-                                           topk_all=topk_all,
-                                           iou_thres=iou_thres,
-                                           conf_thres=conf_thres,
-                                           keras=keras)
-        if pb or tfjs:  # pb prerequisite to tfjs
-            f[6], _ = export_pb(s_model, file)
-        if tflite or edgetpu:
-            f[7], _ = export_tflite(s_model, im, file, int8 or edgetpu, data=data, nms=nms, agnostic_nms=agnostic_nms)
-            if edgetpu:
-                f[8], _ = export_edgetpu(file)
-            add_tflite_metadata(f[8] or f[7], metadata, num_outputs=len(s_model.outputs))
-        if tfjs:
-            f[9], _ = export_tfjs(file)
-    if paddle:  # PaddlePaddle
-        f[10], _ = export_paddle(model, im, file, metadata)
+    # if any((saved_model, pb, tflite, edgetpu, tfjs)):  # TensorFlow formats
+    #     assert not tflite or not tfjs, 'TFLite and TF.js models must be exported separately, please pass only one type.'
+    #     assert not isinstance(model, ClassificationModel), 'ClassificationModel export to TF formats not yet supported.'
+    #     f[5], s_model = export_saved_model(model.cpu(),
+    #                                        im,
+    #                                        file,
+    #                                        dynamic,
+    #                                        tf_nms=nms or agnostic_nms or tfjs,
+    #                                        agnostic_nms=agnostic_nms or tfjs,
+    #                                        topk_per_class=topk_per_class,
+    #                                        topk_all=topk_all,
+    #                                        iou_thres=iou_thres,
+    #                                        conf_thres=conf_thres,
+    #                                        keras=keras)
+    #     if pb or tfjs:  # pb prerequisite to tfjs
+    #         f[6], _ = export_pb(s_model, file)
+    #     if tflite or edgetpu:
+    #         f[7], _ = export_tflite(s_model, im, file, int8 or edgetpu, data=data, nms=nms, agnostic_nms=agnostic_nms)
+    #         if edgetpu:
+    #             f[8], _ = export_edgetpu(file)
+    #         add_tflite_metadata(f[8] or f[7], metadata, num_outputs=len(s_model.outputs))
+    #     if tfjs:
+    #         f[9], _ = export_tfjs(file)
+    # if paddle:  # PaddlePaddle
+    #     f[10], _ = export_paddle(model, im, file, metadata)
 
     # Finish
     f = [str(x) for x in f if x]  # filter out '' and None
@@ -738,7 +737,7 @@ def parse_opt():
         help='torchscript, onnx, onnx_end2end, openvino, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle')
     opt = parser.parse_args()
 
-    if 'onnx_end2end' in opt.include:  
+    if 'onnx_end2end' in opt.include:
         opt.simplify = True
         opt.dynamic = True
         opt.inplace = True
