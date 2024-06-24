@@ -225,7 +225,7 @@ def export_onnx_end2end(model, im, file, simplify, topk_all, iou_thres, conf_thr
                             f,
                             verbose=False,
                             export_params=True,       # store the trained parameter weights inside the model file
-                            opset_version=11,
+                            opset_version=13,
                             do_constant_folding=True, # whether to execute constant folding for optimization
                             input_names=['images'],
                             output_names=output_names,
